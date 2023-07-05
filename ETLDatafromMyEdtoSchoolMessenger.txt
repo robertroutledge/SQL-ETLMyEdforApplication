@@ -1,0 +1,126 @@
+/*before this SQL script is run, a batch file is triggered by task scheduler that downloads all student data from the MyEd Website. The first step in this job is executing a SSIS task that cleans the MyEd data, mostly so that the common comma delimiter problems are solved*/
+
+TRUNCATE TABLE  dbo.MyED_GDE_Student_Period_Absence_Attend
+GO
+BULK INSERT dbo.MyED_GDE_Student_Period_Absence_Attend
+FROM 'C:\scripts\download\SSIS_Cleaned\StudentPeriodAbsencesAttend_cleaned.txt'
+WITH
+(
+FIRSTROW=2,
+FIELDTERMINATOR = '|',
+ROWTERMINATOR = '\n'
+)
+GO
+
+TRUNCATE TABLE [dbo].[MyED_GDE_Student_Demographic_Enh] 
+GO
+BULK INSERT [dbo].[MyED_GDE_Student_Demographic_Enh] 
+FROM 'C:\scripts\download\SSIS_Cleaned\StudentDemographicEnh_cleaned.txt'
+WITH
+(
+FIRSTROW=2,
+FIELDTERMINATOR = '|',
+ROWTERMINATOR = '\n'
+)
+GO
+
+USE [MyEd Integration] 
+GO
+DROP TABLE IF EXISTS dbo.SchoolMessenger 
+DROP TABLE IF EXISTS dbo.SchoolMessenger_AbsentInfo 
+
+SELECT [School_Number], [Student_Number],CONVERT(date,[Absence_Date],101) AS 'Absence_Date',[Absence_Category],[Authorized_Absence_Code], [Office_Reason],[Period_Id]
+INTO SchoolMessenger
+FROM  [dbo].[MyED_GDE_Student_Period_Absence_Attend];
+GO
+
+SELECT CONVERT(varchar(50),[Student_Number]) as 'Student Number',CONVERT(varchar(50),[Absence_Date],101) as 'Absence Date',CONVERT(VARCHAR(50),[Period_Id]) as 'Period Id'
+INTO SchoolMessenger_AbsentInfo
+FROM [dbo].[SchoolMessenger]
+  WHERE (DAY([Absence_Date]) = DAY(GETDATE()) AND MONTH([Absence_Date]) = MONTH(GETDATE()) AND YEAR([Absence_Date]) = YEAR(GETDATE())) AND
+(([School_Number] = '2222007' OR [School_Number] = '2222017' OR [School_Number] = '2222022' OR [School_Number] = '2222025' OR [School_Number] = '2222027')) AND
+[Office_Reason] IS NULL AND 
+[Absence_Category] = 'A' AND
+[Authorized_Absence_Code] = 'false'
+GO
+
+USE [MyEd Integration]
+DROP TABLE IF EXISTS dbo.SchoolMessenger_StudentInfo
+SELECT  CONVERT(nvarchar(10),Student_number) AS 'Student number', Usual_first_name as 'Usual first name', Usual_surname as 'Usual surname', Phone_number as 'Phone number',CONVERT(nvarchar(10),School_number) AS 'School number',Home_language as 'Home language', Grade,Gender,Enrollment_status as 'Enrollment status'  
+INTO SchoolMessenger_StudentInfo
+FROM MyED_GDE_Student_Demographic_Enh
+WHERE Enrollment_status ='active'
+GO
+
+ALTER TABLE SchoolMessenger_StudentInfo
+ADD parent_email nvarchar(50)
+GO
+
+UPDATE SchoolMessenger_StudentInfo
+SET parent_email = B.EmergencyContact1Email1
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET parent_email = B.EmergencyContact1Email2
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE parent_email is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET parent_email = B.EmergencyContact2Email1
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE parent_email is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET parent_email = B.EmergencyContact2Email2
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE parent_email is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET [Phone number] = B.EmergencyContact1HomePhoneNumber
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE [Phone number] is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET [Phone number] = B.EmergencyContact1CellPhoneNumber
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE [Phone number] is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET [Phone number] = B.EmergencyContact2HomePhoneNumber
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE [Phone number] is null
+Go
+
+UPDATE SchoolMessenger_StudentInfo
+SET [Phone number] = B.EmergencyContact2CellPhoneNumber
+FROM SchoolMessenger_StudentInfo AS A
+Inner Join MyED_GDE_SchoolMessengerAddressBook as B
+ON A.[Student number] = B.PupilNumber
+WHERE [Phone number] is null
+Go
+
+/*the next two steps in the jobs were saved dtsx jobs that exported two csv files that are necessary to be used by school messenger.
+
+After this SQL job runs, the following batch commands are run to upload the files to the applications's ftp server. The batch file is triggered by a MS Task Scheduler Task, thus automating the entire process*/
+
+
